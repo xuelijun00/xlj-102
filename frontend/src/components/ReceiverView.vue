@@ -16,9 +16,10 @@
             <el-table-column prop="test_items" label="送检项目" />
             <el-table-column prop="received_at" label="接收时间" />
             <el-table-column prop="version" label="版本" width="80" />
-            <el-table-column label="操作" width="150">
+            <el-table-column label="操作" width="200">
               <template #default="scope">
                 <el-button size="small" @click="showAudit(scope.row)">查看记录</el-button>
+                <el-button size="small" @click="openRecordTemp(scope.row)">录入温度</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -39,9 +40,29 @@
             <el-table-column prop="sample_type" label="样本类型" />
             <el-table-column prop="current_owner_name" label="负责人" />
             <el-table-column prop="received_at" label="接收时间" />
-            <el-table-column label="操作" width="150">
+            <el-table-column label="操作" width="200">
               <template #default="scope">
                 <el-button size="small" @click="showAudit(scope.row)">查看记录</el-button>
+                <el-button size="small" @click="openRecordTemp(scope.row)">录入温度</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
+        <el-tab-pane label="冷链异常" name="cold_chain">
+          <el-table :data="coldChainIssues">
+            <el-table-column prop="sample_code" label="样本编号" />
+            <el-table-column prop="sample_type" label="样本类型" />
+            <el-table-column prop="source_unit" label="来源单位" />
+            <el-table-column prop="status" label="状态">
+              <template #default="scope">
+                <el-tag :type="statusTagType(scope.row.status)">{{ scope.row.status_label }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="created_at" label="创建时间" />
+            <el-table-column label="操作" width="200">
+              <template #default="scope">
+                <el-button size="small" @click="showIssueDetail(scope.row)">查看详情</el-button>
+                <el-button type="primary" size="small" v-if="scope.row.status === 'pending_receiver'" @click="openReceiverNote(scope.row)">处理</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -77,6 +98,94 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="showRecordTemp" title="录入温度读数" width="500px">
+      <el-form :model="tempForm" label-width="100px">
+        <el-form-item label="样本编号">
+          <el-input :value="currentSample?.sample_code" disabled />
+        </el-form-item>
+        <el-form-item label="样本类型">
+          <el-input :value="currentSample?.sample_type" disabled />
+        </el-form-item>
+        <el-form-item label="温度读数(°C)" prop="temperature">
+          <el-input-number v-model="tempForm.temperature" :precision="1" :step="0.5" placeholder="请输入温度" />
+        </el-form-item>
+        <el-form-item label="阶段" prop="stage">
+          <el-select v-model="tempForm.stage">
+            <el-option label="接收" value="receiving" />
+            <el-option label="交接" value="handover" />
+            <el-option label="检测前" value="before_inspection" />
+            <el-option label="检测后" value="after_inspection" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showRecordTemp = false">取消</el-button>
+        <el-button type="primary" @click="handleRecordTemp">确认录入</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showIssueDetail" title="冷链异常详情" width="700px">
+      <div v-if="currentIssue">
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="样本编号">{{ currentIssue.sample_code }}</el-descriptions-item>
+          <el-descriptions-item label="样本类型">{{ currentIssue.sample_type }}</el-descriptions-item>
+          <el-descriptions-item label="来源单位">{{ currentIssue.source_unit }}</el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag :type="statusTagType(currentIssue.status)">{{ currentIssue.status_label }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="运输说明" :span="2">
+            {{ currentIssue.transport_note || '未填写' }}
+            <span v-if="currentIssue.transport_note_by_name">（{{ currentIssue.transport_note_by_name }} 于 {{ currentIssue.transport_note_at }}）</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="是否影响检测" :span="2">
+            <el-tag :type="currentIssue.affects_inspection === 1 ? 'danger' : 'success'">
+              {{ currentIssue.affects_inspection === 1 ? '是' : (currentIssue.affects_inspection === 0 ? '否' : '未评估') }}
+            </el-tag>
+            <span v-if="currentIssue.affects_inspection_by_name">（{{ currentIssue.affects_inspection_by_name }} 于 {{ currentIssue.affects_inspection_at }}）</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="最终处置" :span="2">
+            <el-tag v-if="currentIssue.final_disposition" :type="dispositionTagType(currentIssue.final_disposition)">
+              {{ currentIssue.final_disposition_label }}
+            </el-tag>
+            <span v-else>未处置</span>
+            <span v-if="currentIssue.final_disposition_by_name">（{{ currentIssue.final_disposition_by_name }} 于 {{ currentIssue.final_disposition_at }}）</span>
+          </el-descriptions-item>
+        </el-descriptions>
+        <div style="margin-top: 20px;">
+          <h4>温度时间线</h4>
+          <div v-if="currentIssue.abnormal_readings && currentIssue.abnormal_readings.length > 0">
+            <div v-for="(reading, index) in currentIssue.abnormal_readings" :key="reading.id" class="timeline-item">
+              <div class="timeline-dot abnormal"></div>
+              <div class="timeline-content">
+                <span class="timeline-time">{{ reading.recorded_at }}</span>
+                <span class="timeline-stage">[{{ reading.stage_label }}]</span>
+                <span class="timeline-temp" :class="{ abnormal: reading.is_abnormal === 1 }">{{ reading.temperature }}°C</span>
+                <span class="timeline-operator">记录人：{{ reading.recorded_by_name }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-else>
+            <el-empty description="暂无温度记录" />
+          </div>
+        </div>
+      </div>
+    </el-dialog>
+
+    <el-dialog v-model="showReceiverNote" title="补充运输说明" width="500px">
+      <el-form :model="receiverNoteForm" label-width="100px">
+        <el-form-item label="样本编号">
+          <el-input :value="currentIssueForNote?.sample_code" disabled />
+        </el-form-item>
+        <el-form-item label="运输说明" prop="transport_note">
+          <el-input v-model="receiverNoteForm.transport_note" type="textarea" :rows="4" placeholder="请描述运输过程中的温度异常情况及原因" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showReceiverNote = false">取消</el-button>
+        <el-button type="primary" @click="handleSubmitReceiverNote">提交说明</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="showAuditDialog" title="操作记录" width="600px">
       <el-table :data="auditLogs">
         <el-table-column prop="created_at" label="时间" />
@@ -92,7 +201,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { sampleAPI, userAPI } from '../utils/api'
+import { sampleAPI, userAPI, coldChainAPI } from '../utils/api'
 
 const activeTab = ref('pending_handover')
 const samples = ref([])
@@ -101,14 +210,31 @@ const selectedInspector = ref(null)
 const inspectors = ref([])
 const showAddForm = ref(false)
 const showAuditDialog = ref(false)
+const showRecordTemp = ref(false)
+const showIssueDetail = ref(false)
+const showReceiverNote = ref(false)
 const auditLogs = ref([])
+const coldChainIssues = ref([])
 const addFormRef = ref(null)
+
+const currentSample = ref(null)
+const currentIssue = ref(null)
+const currentIssueForNote = ref(null)
 
 const addForm = ref({
   source_unit: '',
   sample_type: '',
   test_items: '',
   received_at: ''
+})
+
+const tempForm = ref({
+  temperature: '',
+  stage: 'receiving'
+})
+
+const receiverNoteForm = ref({
+  transport_note: ''
 })
 
 const addRules = {
@@ -120,6 +246,25 @@ const addRules = {
 
 const pendingSamples = computed(() => samples.value.filter(s => s.status === 'pending_handover'))
 const assignedSamples = computed(() => samples.value.filter(s => s.status === 'handover_assigned'))
+
+const statusTagType = (status) => {
+  const map = {
+    'pending_receiver': 'warning',
+    'pending_inspector': 'info',
+    'pending_qc': 'danger',
+    'resolved': 'success'
+  }
+  return map[status] || 'info'
+}
+
+const dispositionTagType = (disposition) => {
+  const map = {
+    'continue': 'success',
+    'resample': 'warning',
+    'discard': 'danger'
+  }
+  return map[disposition] || 'info'
+}
 
 const loadSamples = async () => {
   try {
@@ -136,6 +281,15 @@ const loadInspectors = async () => {
     inspectors.value = res.data
   } catch (err) {
     console.error('加载检测员失败', err)
+  }
+}
+
+const loadColdChainIssues = async () => {
+  try {
+    const res = await coldChainAPI.getAllIssues()
+    coldChainIssues.value = res.data
+  } catch (err) {
+    console.error('加载冷链异常失败', err)
   }
 }
 
@@ -182,6 +336,73 @@ const showAudit = async (row) => {
   }
 }
 
+const openRecordTemp = (row) => {
+  currentSample.value = row
+  tempForm.value = {
+    temperature: '',
+    stage: 'receiving'
+  }
+  showRecordTemp.value = true
+}
+
+const handleRecordTemp = async () => {
+  if (!currentSample.value || tempForm.value.temperature === '') {
+    alert('请填写温度读数')
+    return
+  }
+  try {
+    const res = await coldChainAPI.recordTemperature({
+      sample_id: currentSample.value.id,
+      temperature: tempForm.value.temperature,
+      stage: tempForm.value.stage
+    })
+    showRecordTemp.value = false
+    if (res.data.is_abnormal) {
+      alert(`温度读数录入成功！该温度超出允许范围，已创建冷链异常记录。`)
+    } else {
+      alert('温度读数录入成功')
+    }
+    await loadColdChainIssues()
+  } catch (err) {
+    alert(err.response?.data?.error || '录入失败')
+  }
+}
+
+const showIssueDetail = async (row) => {
+  try {
+    const res = await coldChainAPI.getIssue(row.id)
+    currentIssue.value = res.data
+    showIssueDetail.value = true
+  } catch (err) {
+    alert(err.response?.data?.error || '获取详情失败')
+  }
+}
+
+const openReceiverNote = (row) => {
+  currentIssueForNote.value = row
+  receiverNoteForm.value = {
+    transport_note: ''
+  }
+  showReceiverNote.value = true
+}
+
+const handleSubmitReceiverNote = async () => {
+  if (!currentIssueForNote.value || !receiverNoteForm.value.transport_note) {
+    alert('请填写运输说明')
+    return
+  }
+  try {
+    await coldChainAPI.submitReceiverNote(currentIssueForNote.value.id, {
+      transport_note: receiverNoteForm.value.transport_note
+    })
+    showReceiverNote.value = false
+    alert('运输说明已提交，等待检测员评估')
+    await loadColdChainIssues()
+  } catch (err) {
+    alert(err.response?.data?.error || '提交失败')
+  }
+}
+
 let ws = null
 
 const connectWebSocket = () => {
@@ -193,6 +414,7 @@ const connectWebSocket = () => {
   ws.onmessage = () => {
     loadSamples()
     loadInspectors()
+    loadColdChainIssues()
   }
   ws.onerror = () => {
     setTimeout(connectWebSocket, 5000)
@@ -205,6 +427,7 @@ const connectWebSocket = () => {
 onMounted(() => {
   loadSamples()
   loadInspectors()
+  loadColdChainIssues()
   connectWebSocket()
 })
 
@@ -238,5 +461,56 @@ onUnmounted(() => {
   padding: 12px;
   background: #fafafa;
   border-radius: 4px;
+}
+
+.timeline-item {
+  display: flex;
+  margin-bottom: 12px;
+}
+
+.timeline-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #E6A23C;
+  margin-right: 12px;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.timeline-dot.abnormal {
+  background: #F56C6C;
+}
+
+.timeline-content {
+  flex: 1;
+  padding: 8px 12px;
+  background: #f5f7fa;
+  border-radius: 4px;
+}
+
+.timeline-time {
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+.timeline-stage {
+  color: #909399;
+  margin-right: 8px;
+}
+
+.timeline-temp {
+  font-weight: 600;
+  color: #67C23A;
+  margin-right: 12px;
+}
+
+.timeline-temp.abnormal {
+  color: #F56C6C;
+}
+
+.timeline-operator {
+  color: #909399;
+  font-size: 12px;
 }
 </style>

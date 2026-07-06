@@ -51,10 +51,12 @@ setBroadcast(broadcast);
 const authRoutes = require('./routes/auth');
 const sampleRoutes = require('./routes/samples');
 const userRoutes = require('./routes/users');
+const coldChainRoutes = require('./routes/cold-chain');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/samples', sampleRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/cold-chain', coldChainRoutes);
 
 const PORT = process.env.PORT || 3000;
 

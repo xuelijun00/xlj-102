@@ -45,3 +45,14 @@ export const sampleAPI = {
 export const userAPI = {
   getInspectors: () => api.get('/users/inspectors')
 }
+
+export const coldChainAPI = {
+  recordTemperature: (data) => api.post('/cold-chain/readings', data),
+  getReadings: (sampleId) => api.get(`/cold-chain/readings/${sampleId}`),
+  getIssues: () => api.get('/cold-chain/issues'),
+  getAllIssues: () => api.get('/cold-chain/issues/all'),
+  getIssue: (id) => api.get(`/cold-chain/issues/${id}`),
+  submitReceiverNote: (id, data) => api.post(`/cold-chain/issues/${id}/receiver-note`, data),
+  submitInspectorAssess: (id, data) => api.post(`/cold-chain/issues/${id}/inspector-assess`, data),
+  submitFinalDisposition: (id, data) => api.post(`/cold-chain/issues/${id}/final-disposition`, data)
+}

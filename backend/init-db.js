@@ -120,6 +120,45 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     await runQuery('CREATE INDEX IF NOT EXISTS idx_samples_owner ON samples(current_owner_id);');
     await runQuery('CREATE INDEX IF NOT EXISTS idx_audit_target ON audit_logs(target_type, target_id);');
 
+    await runQuery(`
+CREATE TABLE IF NOT EXISTS temperature_readings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sample_id INTEGER NOT NULL,
+  temperature REAL NOT NULL,
+  recorded_by INTEGER NOT NULL,
+  recorded_at TEXT NOT NULL,
+  stage TEXT NOT NULL CHECK(stage IN ('receiving', 'handover', 'before_inspection', 'after_inspection')),
+  is_abnormal INTEGER DEFAULT 0,
+  FOREIGN KEY (sample_id) REFERENCES samples(id),
+  FOREIGN KEY (recorded_by) REFERENCES users(id)
+);`);
+
+    await runQuery(`
+CREATE TABLE IF NOT EXISTS cold_chain_issues (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sample_id INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending_receiver' CHECK(status IN ('pending_receiver', 'pending_inspector', 'pending_qc', 'resolved')),
+  transport_note TEXT,
+  transport_note_by INTEGER,
+  transport_note_at TEXT,
+  affects_inspection INTEGER,
+  affects_inspection_by INTEGER,
+  affects_inspection_at TEXT,
+  final_disposition TEXT CHECK(final_disposition IN ('continue', 'resample', 'discard')),
+  final_disposition_by INTEGER,
+  final_disposition_at TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (sample_id) REFERENCES samples(id),
+  FOREIGN KEY (transport_note_by) REFERENCES users(id),
+  FOREIGN KEY (affects_inspection_by) REFERENCES users(id),
+  FOREIGN KEY (final_disposition_by) REFERENCES users(id)
+);`);
+
+    await runQuery('CREATE INDEX IF NOT EXISTS idx_temp_readings_sample ON temperature_readings(sample_id);');
+    await runQuery('CREATE INDEX IF NOT EXISTS idx_temp_readings_recorded ON temperature_readings(recorded_at);');
+    await runQuery('CREATE INDEX IF NOT EXISTS idx_cold_chain_issues_sample ON cold_chain_issues(sample_id);');
+    await runQuery('CREATE INDEX IF NOT EXISTS idx_cold_chain_issues_status ON cold_chain_issues(status);');
+
     const hashPassword = (password) => bcrypt.hashSync(password, 10);
 
     await runQuery('INSERT OR IGNORE INTO users (username, password, role, name) VALUES (?, ?, ?, ?)', ['receiver001', hashPassword('123456'), 'sample_receiver', '张收样员']);
@@ -140,6 +179,21 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     await runQuery('INSERT INTO audit_logs (user_id, action, target_type, target_id, from_state, to_state, detail) VALUES (?, ?, ?, ?, ?, ?, ?)', [receiverId, 'create', 'sample', 3, null, 'pending_handover', '收样员张收样员录入样本S20260706003']);
     await runQuery('INSERT INTO audit_logs (user_id, action, target_type, target_id, from_state, to_state, detail) VALUES (?, ?, ?, ?, ?, ?, ?)', [receiverId, 'create', 'sample', 4, null, 'pending_handover', '收样员张收样员录入样本S20260706004']);
     await runQuery('INSERT INTO audit_logs (user_id, action, target_type, target_id, from_state, to_state, detail) VALUES (?, ?, ?, ?, ?, ?, ?)', [receiverId, 'create', 'sample', 5, null, 'pending_handover', '收样员张收样员录入样本S20260706005']);
+
+    await runQuery('INSERT INTO temperature_readings (sample_id, temperature, recorded_by, recorded_at, stage, is_abnormal) VALUES (?, ?, ?, ?, ?, ?)', [1, 12.5, receiverId, '2026-07-06 08:35:00', 'receiving', 1]);
+    await runQuery('INSERT INTO temperature_readings (sample_id, temperature, recorded_by, recorded_at, stage, is_abnormal) VALUES (?, ?, ?, ?, ?, ?)', [1, 10.2, receiverId, '2026-07-06 08:40:00', 'handover', 1]);
+    await runQuery('INSERT INTO temperature_readings (sample_id, temperature, recorded_by, recorded_at, stage, is_abnormal) VALUES (?, ?, ?, ?, ?, ?)', [2, 6.5, receiverId, '2026-07-06 08:45:00', 'receiving', 0]);
+    await runQuery('INSERT INTO temperature_readings (sample_id, temperature, recorded_by, recorded_at, stage, is_abnormal) VALUES (?, ?, ?, ?, ?, ?)', [3, -18.0, receiverId, '2026-07-06 09:05:00', 'receiving', 0]);
+    await runQuery('INSERT INTO temperature_readings (sample_id, temperature, recorded_by, recorded_at, stage, is_abnormal) VALUES (?, ?, ?, ?, ?, ?)', [4, 15.0, receiverId, '2026-07-06 09:20:00', 'receiving', 1]);
+    await runQuery('INSERT INTO temperature_readings (sample_id, temperature, recorded_by, recorded_at, stage, is_abnormal) VALUES (?, ?, ?, ?, ?, ?)', [4, 14.5, receiverId, '2026-07-06 09:25:00', 'handover', 1]);
+
+    await runQuery('INSERT INTO cold_chain_issues (sample_id, status) VALUES (?, ?)', [1, 'pending_receiver']);
+    await runQuery('INSERT INTO cold_chain_issues (sample_id, status) VALUES (?, ?)', [4, 'pending_receiver']);
+
+    const qcId = (await getQuery('SELECT id FROM users WHERE username = ?', ['qc001'])).id;
+    const inspectorId = (await getQuery('SELECT id FROM users WHERE username = ?', ['inspector001'])).id;
+
+    await runQuery('INSERT INTO cold_chain_issues (sample_id, status, transport_note, transport_note_by, transport_note_at, affects_inspection, affects_inspection_by, affects_inspection_at, final_disposition, final_disposition_by, final_disposition_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [3, 'resolved', '运输过程中使用干冰，温度保持良好', receiverId, '2026-07-06 09:10:00', 0, inspectorId, '2026-07-06 10:00:00', 'continue', qcId, '2026-07-06 11:00:00']);
 
     console.log('数据库初始化完成');
     db.close();
