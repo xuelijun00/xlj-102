@@ -1,0 +1,17 @@
+# 依赖目录
+node_modules/
+
+# 系统文件
+.DS_Store
+
+# IDEA配置
+.idea/
+*.iml
+out/
+
+# 已出题题目汇总
+已出题题目汇总.md
+
+# 训练记录
+训练记录.md
+*.xlsx
