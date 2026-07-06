@@ -185,12 +185,14 @@ const showAudit = async (row) => {
 let ws = null
 
 const connectWebSocket = () => {
-  ws = new WebSocket('ws://localhost:3000')
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  ws = new WebSocket(`${protocol}//${window.location.host}/`)
   ws.onopen = () => {
     ws.send(JSON.stringify({ type: 'subscribe', role: 'sample_receiver' }))
   }
   ws.onmessage = () => {
     loadSamples()
+    loadInspectors()
   }
   ws.onerror = () => {
     setTimeout(connectWebSocket, 5000)

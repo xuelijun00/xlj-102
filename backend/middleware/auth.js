@@ -11,7 +11,16 @@ const generateToken = (user) => {
   );
 };
 
-const verifyToken = (req, res, next) => {
+const getQuery = (sql, params = []) => {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => {
+      if (err) reject(err);
+      else resolve(row);
+    });
+  });
+};
+
+const verifyToken = async (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) {
     return res.status(401).json({ error: '未提供认证令牌' });
@@ -19,7 +28,7 @@ const verifyToken = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const user = db.prepare('SELECT id, username, role, name FROM users WHERE id = ?').get(decoded.id);
+    const user = await getQuery('SELECT id, username, role, name FROM users WHERE id = ?', [decoded.id]);
     if (!user) {
       return res.status(401).json({ error: '用户不存在' });
     }
